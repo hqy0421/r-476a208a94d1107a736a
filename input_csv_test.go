@@ -600,3 +600,114 @@ func TestCSVReader_ReadRow_PreReadParity(t *testing.T) {
 		t.Errorf("expected expanded pre-read row %v, got %v", []any{"3", "Apple", "aomori", "red"}, preRows[2])
 	}
 }
+
+func TestCSVReader_InNULLColumns(t *testing.T) {
+	tests := []struct {
+		name     string
+		csvData  string
+		opts     *ReadOpts
+		wantPre  [][]any
+		wantRows [][]any
+	}{
+		{
+			name: "perColumnPlaceholder",
+			csvData: "id,name,age,memo\n" +
+				"1,alice,30,\n" +
+				"2,\\N,\\N,\\N\n" +
+				"3,bob,25,tokyo\n",
+			opts: NewReadOpts(
+				InHeader(true),
+				InPreRead(2),
+				InNULLColumns(map[string]string{"age": `\N`, "memo": `\N`}),
+			),
+			wantPre: [][]any{
+				{"1", "alice", "30", ""},
+			},
+			wantRows: [][]any{
+				// name is not in the map: `\N` stays a literal string.
+				// age and memo are decoded to NULL.
+				{"2", `\N`, nil, nil},
+				{"3", "bob", "25", "tokyo"},
+			},
+		},
+		{
+			name: "perColumnPrecedesGlobal",
+			csvData: "age,memo\n" +
+				"\\N,X\n" +
+				"X,\\N\n",
+			opts: NewReadOpts(
+				InHeader(true),
+				InPreRead(2),
+				InNeedNULL(true),
+				InNULL("X"),
+				InNULLColumns(map[string]string{"age": `\N`}),
+			),
+			wantPre: [][]any{
+				// age: per-column placeholder `\N` -> NULL.
+				// memo: no per-column entry, global "X" -> NULL.
+				{nil, nil},
+			},
+			wantRows: [][]any{
+				// age: per-column replaces global, "X" is not decoded.
+				// memo: global "X" does not match `\N`.
+				{"X", `\N`},
+			},
+		},
+		{
+			name: "noHeaderUsesGeneratedNames",
+			csvData: "a,\\N\n" +
+				"b,c\n",
+			opts: NewReadOpts(
+				InNULLColumns(map[string]string{"c2": `\N`}),
+			),
+			wantPre: [][]any{
+				{"a", nil},
+			},
+			wantRows: [][]any{
+				{"b", "c"},
+			},
+		},
+		{
+			name: "emptyStringIsNotNULL",
+			csvData: "id,memo\n" +
+				"1,\n" +
+				"2,\\N\n",
+			opts: NewReadOpts(
+				InHeader(true),
+				InPreRead(2),
+				InNULLColumns(map[string]string{"memo": `\N`}),
+			),
+			wantPre: [][]any{
+				{"1", ""},
+			},
+			wantRows: [][]any{
+				{"2", nil},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, err := NewCSVReader(strings.NewReader(tt.csvData), tt.opts)
+			if err != nil {
+				t.Fatalf("unexpected NewCSVReader error: %v", err)
+			}
+			preRows := r.PreReadRow()
+			if !reflect.DeepEqual(preRows, tt.wantPre) {
+				t.Errorf("PreReadRow() = %v, want %v", preRows, tt.wantPre)
+			}
+			names, err := r.Names()
+			if err != nil {
+				t.Fatalf("unexpected Names error: %v", err)
+			}
+			for i, want := range tt.wantRows {
+				row, err := r.ReadRow(make([]any, len(names)))
+				if err != nil {
+					t.Fatalf("unexpected ReadRow error: %v", err)
+				}
+				if !reflect.DeepEqual(row, want) {
+					t.Errorf("ReadRow(%d) = %v, want %v", i, row, want)
+				}
+			}
+		})
+	}
+}

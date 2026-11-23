@@ -13,6 +13,7 @@ type CSVWriter struct {
 	needQuotes   string
 	endLine      string
 	outNULL      string
+	nullColumns  map[string]string
 	outDelimiter rune
 	outQuote     rune
 	outHeader    bool
@@ -46,6 +47,7 @@ func NewCSVWriter(writeOpts *WriteOpts) *CSVWriter {
 	}
 	w.needNULL = writeOpts.OutNeedNULL
 	w.outNULL = writeOpts.OutNULL
+	w.nullColumns = writeOpts.OutNULLColumns
 	return w
 }
 
@@ -69,14 +71,18 @@ func (w *CSVWriter) PreWrite(columns []string, types []string) error {
 }
 
 // WriteRow writes a row of values to the output stream.
-func (w *CSVWriter) WriteRow(values []any, _ []string) error {
+func (w *CSVWriter) WriteRow(values []any, columns []string) error {
 	for n, column := range values {
 		if n > 0 {
 			if _, err := w.writer.WriteRune(w.outDelimiter); err != nil {
 				return err
 			}
 		}
-		if err := w.writeColumn(column); err != nil {
+		name := ""
+		if n < len(columns) {
+			name = columns[n]
+		}
+		if err := w.writeColumn(column, name); err != nil {
 			return err
 		}
 	}
@@ -84,19 +90,29 @@ func (w *CSVWriter) WriteRow(values []any, _ []string) error {
 	return err
 }
 
-func (w *CSVWriter) writeColumn(column any) error {
+func (w *CSVWriter) writeColumn(column any, name string) error {
 	if column == nil {
-		var err error
-		if w.needNULL {
-			_, err = w.writer.WriteString(w.outNULL)
-		} else {
-			_, err = w.writer.WriteString("")
+		placeholder, ok := w.nullString(name)
+		if !ok {
+			placeholder = ""
 		}
+		_, err := w.writer.WriteString(placeholder)
 		return err
 	}
 
 	str := ValString(column)
 	return w.writeColumnString(str)
+}
+
+// nullString returns the placeholder to write for a NULL value and
+// whether NULL replacement is enabled for the column.
+// A per-column placeholder (OutNULLColumns) takes precedence over
+// the global placeholder (OutNULL, used when OutNeedNULL is true).
+func (w *CSVWriter) nullString(name string) (string, bool) {
+	if placeholder, ok := w.nullColumns[name]; ok {
+		return placeholder, true
+	}
+	return w.outNULL, w.needNULL
 }
 
 func (w *CSVWriter) writeColumnString(column string) error {

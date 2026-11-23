@@ -46,6 +46,13 @@ type WriteOpts struct {
 	OutQuote string
 	// OutNeedNULL is true, replace NULL with OutNULL.
 	OutNULL string
+	// OutNULLColumns maps column names to placeholder strings
+	// written instead of NULL for that column only.
+	// It takes precedence over OutNULL for the listed columns.
+	// Columns not listed fall back to OutNULL (when OutNeedNULL is true).
+	// Empty strings are written as empty fields, so the reader of the
+	// exported file can distinguish them from NULL placeholders.
+	OutNULLColumns map[string]string
 	// OutFormat is the writing format.
 	OutFormat Format
 	// OutAllQuotes is true if Enclose all fields (Use only CSV).
@@ -125,6 +132,15 @@ func OutNeedNULL(n bool) WriteOpt {
 func OutNULL(s string) WriteOpt {
 	return func(args *WriteOpts) {
 		args.OutNULL = s
+	}
+}
+
+// OutNULLColumns sets per-column output strings to replace NULL.
+// The map key is a column name and the value is the placeholder
+// string written instead of NULL for that column only.
+func OutNULLColumns(m map[string]string) WriteOpt {
+	return func(args *WriteOpts) {
+		args.OutNULLColumns = m
 	}
 }
 

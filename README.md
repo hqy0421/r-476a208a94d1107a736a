@@ -36,6 +36,7 @@ For usage as a library, please refer to the [godoc](https://pkg.go.dev/github.co
   * 3.3. [Output formats](#output-formats)
     * 3.3.1. [Output options](#output-options)
   * 3.4. [Handling of NULL](#handling-of-null)
+    * 3.4.1. [Per-column NULL placeholders](#per-column-null)
   * 3.5. [Multiple queries](#multiple-queries)
 * 4. [Example](#example)
   * 4.1. [STDIN input](#stdin-input)
@@ -199,6 +200,7 @@ trdsql -o[output format] -t [input filename]
 * `-ijq` **string** jq expression string for input(JSON/JSONL only).
 * `-ilr` **int** limited number of rows to read.
 * `-inull` **string** value(string) to convert to null on input.
+* `-inullcol` **column=placeholder** value(string) to convert to null on input for the column only. Can be repeated.
 * `-inum` add row number column.
 * `-ir` **int** number of rows to preread. (default 1)
 * `-is` **int** skip header row.
@@ -230,6 +232,7 @@ Or, [guess the output format by file name](#Guessbyoutputfilename).
 * `-ocrlf` use CRLF for output. End each output line with '\\r\\n' instead of '\\n'."(CSV only).
 * `-onowrap` do not wrap long columns(AT and MD only).
 * `-onull` value(string) to convert from null on output.
+* `-onullcol` **column=placeholder** value(string) to convert from null on output for the column only. Can be repeated.
 * `-oz` **string** compression format for output. [ gzip | bz2 | zstd | lz4 | xz ]
 
 ###  3.4. <a name='handling-of-null'></a>Handling of NULL
@@ -263,6 +266,39 @@ $ echo '[1,null,""]' | trdsql -inull "" -ojson -ijson "SELECT * FROM -"
     "c1": null
   }
 ]
+```
+
+####  3.4.1. <a name='per-column-null'></a>Per-column NULL placeholders
+
+Some data suppliers use a dedicated placeholder for "unknown" and an
+empty string for "confirmed empty". Use `-inullcol column=placeholder`
+(repeatable) to decode the placeholder to NULL only in the named
+columns (CSV/TSV/PSV input). Empty strings are never converted, so
+`IS NULL` and `= ''` stay distinct in SQL. Columns not listed fall
+back to the global `-inull` setting.
+
+```console
+$ cat supplier.csv
+id,name,age,memo
+1,alice,30,
+2,\N,\N,\N
+$ trdsql -ih -inullcol 'age=\N' -inullcol 'memo=\N' "SELECT id FROM supplier.csv WHERE memo IS NULL"
+2
+$ trdsql -ih -inullcol 'age=\N' -inullcol 'memo=\N' "SELECT id FROM supplier.csv WHERE memo = ''"
+1
+```
+
+Use `-onullcol column=placeholder` to write NULL back as the
+placeholder only in the named columns when exporting. Empty strings
+are written as empty fields, so another reader applying the same
+per-column convention can still tell NULL and "" apart.
+
+```console
+$ trdsql -ih -oh -inullcol 'age=\N' -inullcol 'memo=\N' \
+    -onullcol 'age=\N' -onullcol 'memo=\N' \
+    "SELECT * FROM supplier.csv WHERE id = 2"
+id,name,age,memo
+2,\N,\N,\N
 ```
 
 ###  3.5. <a name='multiple-queries'></a>Multiple queries

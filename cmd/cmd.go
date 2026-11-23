@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/dsnet/compress/bzip2"
@@ -57,6 +58,32 @@ func (v *nilString) Set(s string) error {
 	return nil
 }
 
+// columnNULL maps column names to NULL placeholder strings.
+// It is a repeatable flag: each use adds one column=placeholder pair.
+type columnNULL map[string]string
+
+// String returns the stored column=placeholder pairs.
+// columnNULL implements the flag.Value interface.
+func (c columnNULL) String() string {
+	pairs := make([]string, 0, len(c))
+	for name, placeholder := range c {
+		pairs = append(pairs, name+"="+placeholder)
+	}
+	sort.Strings(pairs)
+	return strings.Join(pairs, ",")
+}
+
+// Set parses a column=placeholder pair and stores it.
+// columnNULL implements the flag.Value interface.
+func (c columnNULL) Set(s string) error {
+	name, placeholder, ok := strings.Cut(s, "=")
+	if !ok || name == "" {
+		return fmt.Errorf("invalid column NULL %q: want column=placeholder", s)
+	}
+	c[name] = placeholder
+	return nil
+}
+
 // Run executes the main routine.
 // It returns the exit code.
 func (cli Cli) Run(args []string) int {
@@ -82,6 +109,7 @@ func (cli Cli) Run(args []string) int {
 		inJQuery    string
 		inLimitRead int
 		inNull      nilString
+		inNullCol   = columnNULL{}
 		inRowNumber bool
 
 		outFlag         outputFlag
@@ -95,6 +123,7 @@ func (cli Cli) Run(args []string) int {
 		outHeader       bool
 		outNoWrap       bool
 		outNull         nilString
+		outNullCol      = columnNULL{}
 	)
 
 	flags := flag.NewFlagSet(trdsql.AppName, flag.ExitOnError)
@@ -124,6 +153,7 @@ func (cli Cli) Run(args []string) int {
 	flags.IntVar(&inLimitRead, "ilr", 0, "limited number of rows to read.")
 	flags.StringVar(&inJQuery, "ijq", "", "jq expression string for input(JSON/JSONL only).")
 	flags.Var(&inNull, "inull", "value(string) to convert to null on input.")
+	flags.Var(inNullCol, "inullcol", "value(string) to convert to null on input for the column only (column=placeholder). Can be repeated.")
 	flags.BoolVar(&inRowNumber, "inum", false, "add row number column.")
 
 	flags.BoolVar(&inFlag.CSV, "icsv", false, "CSV format for input.")
@@ -145,6 +175,7 @@ func (cli Cli) Run(args []string) int {
 	flags.BoolVar(&outHeader, "oh", false, "output column name as header.")
 	flags.StringVar(&outCompression, "oz", "", "output compression format. [ gz | bz2 | zstd | lz4 | xz ]")
 	flags.Var(&outNull, "onull", "value(string) to convert from null on output.")
+	flags.Var(outNullCol, "onullcol", "value(string) to convert from null on output for the column only (column=placeholder). Can be repeated.")
 
 	flags.BoolVar(&outFlag.CSV, "ocsv", false, "CSV format for output.")
 	flags.BoolVar(&outFlag.LTSV, "oltsv", false, "LTSV format for output.")
@@ -251,6 +282,7 @@ func (cli Cli) Run(args []string) int {
 		trdsql.InJQ(inJQuery),
 		trdsql.InNeedNULL(inNull.valid),
 		trdsql.InNULL(inNull.str),
+		trdsql.InNULLColumns(inNullCol),
 		trdsql.InRowNumber(inRowNumber),
 	)
 
@@ -292,6 +324,7 @@ func (cli Cli) Run(args []string) int {
 		trdsql.OutNoWrap(outNoWrap),
 		trdsql.OutNeedNULL(outNull.valid),
 		trdsql.OutNULL(outNull.str),
+		trdsql.OutNULLColumns(outNullCol),
 		trdsql.OutStream(writer),
 		trdsql.ErrStream(cli.ErrStream),
 	)

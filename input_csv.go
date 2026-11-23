@@ -10,13 +10,14 @@ import (
 
 // CSVReader parses delimiter-separated records.
 type CSVReader struct {
-	reader    *csv.Reader
-	inNULL    string
-	names     []string
-	types     []string
-	preRead   [][]string
-	limitRead bool
-	needNULL  bool
+	reader      *csv.Reader
+	inNULL      string
+	nullColumns map[string]string
+	names       []string
+	types       []string
+	preRead     [][]string
+	limitRead   bool
+	needNULL    bool
 }
 
 // NewCSVReader returns a CSVReader configured with input options.
@@ -42,6 +43,7 @@ func NewCSVReader(reader io.Reader, opts *ReadOpts) (*CSVReader, error) {
 
 	r.needNULL = opts.InNeedNULL
 	r.inNULL = opts.InNULL
+	r.nullColumns = opts.InNULLColumns
 
 	r.limitRead = opts.InLimitRead
 
@@ -145,10 +147,7 @@ func (r *CSVReader) PreReadRow() [][]any {
 	for n := range rowNum {
 		rows[n] = make([]any, len(r.names))
 		for i, f := range r.preRead[n] {
-			rows[n][i] = f
-			if r.needNULL {
-				rows[n][i] = replaceNULL(r.inNULL, rows[n][i])
-			}
+			rows[n][i] = r.decodeNULL(i, f)
 		}
 	}
 	return rows
@@ -171,13 +170,27 @@ func (r *CSVReader) ReadRow(row []any) ([]any, error) {
 	}
 	for i := 0; len(row) > i; i++ {
 		if len(record) > i {
-			row[i] = record[i]
-			if r.needNULL {
-				row[i] = replaceNULL(r.inNULL, row[i])
-			}
+			row[i] = r.decodeNULL(i, record[i])
 		} else {
 			row[i] = nil
 		}
 	}
 	return row, nil
+}
+
+// decodeNULL replaces a placeholder string with NULL.
+// A per-column placeholder (InNULLColumns) takes precedence over
+// the global placeholder (InNULL, used when InNeedNULL is true).
+// Empty strings are left as-is so that they remain distinguishable
+// from NULL in the database.
+func (r *CSVReader) decodeNULL(column int, v any) any {
+	if r.nullColumns != nil && column < len(r.names) {
+		if placeholder, ok := r.nullColumns[r.names[column]]; ok {
+			return replaceNULL(placeholder, v)
+		}
+	}
+	if r.needNULL {
+		return replaceNULL(r.inNULL, v)
+	}
+	return v
 }

@@ -95,6 +95,14 @@ type ReadOpts struct {
 	// InNULL is a string to replace with NULL.
 	InNULL string
 
+	// InNULLColumns maps column names to placeholder strings
+	// that are converted to NULL for that column only.
+	// It takes precedence over InNULL for the listed columns.
+	// Columns not listed fall back to InNULL (when InNeedNULL is true).
+	// Empty strings are never converted: they remain empty strings,
+	// so SQL can distinguish "unknown" (NULL) from "confirmed empty" ('').
+	InNULLColumns map[string]string
+
 	// InJQuery is a jq expression.
 	InJQuery string
 
@@ -211,6 +219,15 @@ func InNeedNULL(n bool) ReadOpt {
 func InNULL(s string) ReadOpt {
 	return func(args *ReadOpts) {
 		args.InNULL = s
+	}
+}
+
+// InNULLColumns sets per-column input strings to replace with NULL.
+// The map key is a column name and the value is the placeholder
+// string that is converted to NULL for that column only.
+func InNULLColumns(m map[string]string) ReadOpt {
+	return func(args *ReadOpts) {
+		args.InNULLColumns = m
 	}
 }
 

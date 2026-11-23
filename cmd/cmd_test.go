@@ -754,3 +754,86 @@ func Test_guessCompression(t *testing.T) {
 		})
 	}
 }
+
+func Test_columnNULL(t *testing.T) {
+	t.Run("setAndString", func(t *testing.T) {
+		c := columnNULL{}
+		if err := c.Set(`age=\N`); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Set("memo="); err != nil {
+			t.Fatal(err)
+		}
+		if got := c.String(); got != `age=\N,memo=` {
+			t.Errorf("String() = %q, want %q", got, `age=\N,memo=`)
+		}
+	})
+	t.Run("invalid", func(t *testing.T) {
+		c := columnNULL{}
+		if err := c.Set("noequals"); err == nil {
+			t.Error("Set() expected error for missing '=', got nil")
+		}
+		if err := c.Set("=placeholder"); err == nil {
+			t.Error("Set() expected error for empty column name, got nil")
+		}
+	})
+}
+
+func TestCli_Run_NullColumn(t *testing.T) {
+	supplier := filepath.Join("..", "testdata", "nullcolumn.csv")
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "nullCondition",
+			args: []string{"trdsql", "-ih",
+				"-inullcol", `age=\N`, "-inullcol", `memo=\N`,
+				"SELECT id FROM " + supplier + " WHERE memo IS NULL"},
+			want: "2\n",
+		},
+		{
+			name: "emptyStringCondition",
+			args: []string{"trdsql", "-ih",
+				"-inullcol", `age=\N`, "-inullcol", `memo=\N`,
+				"SELECT id FROM " + supplier + " WHERE memo = ''"},
+			want: "1\n",
+		},
+		{
+			name: "placeholderNotDecodedOutsideColumns",
+			args: []string{"trdsql", "-ih",
+				"-inullcol", `age=\N`, "-inullcol", `memo=\N`,
+				`SELECT id FROM ` + supplier + ` WHERE name = '\N'`},
+			want: "2\n",
+		},
+		{
+			name: "roundTrip",
+			args: []string{"trdsql", "-ih", "-oh",
+				"-inullcol", `age=\N`, "-inullcol", `memo=\N`,
+				"-onullcol", `age=\N`, "-onullcol", `memo=\N`,
+				"SELECT * FROM " + supplier + " ORDER BY id"},
+			want: "id,name,age,memo\n" +
+				"1,alice,30,\n" +
+				"2,\\N,\\N,\\N\n" +
+				"3,bob,25,tokyo\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outStream, errStream := new(bytes.Buffer), new(bytes.Buffer)
+			cli := Cli{
+				OutStream: outStream,
+				ErrStream: errStream,
+			}
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			if got := cli.Run(tt.args); got != 0 {
+				t.Fatalf("Run() = %v, want 0 (stderr: %s)", got, errStream.String())
+			}
+			if got := outStream.String(); got != tt.want {
+				t.Errorf("output = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
